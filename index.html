@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font-size:14px}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>忠孝國中 3D 校園</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Huninn&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* 版面：全螢幕 3D 校園，四周浮著校園導覽卡（左上校名、下方大樓按鈕、右側樓層面板） */
+:root {
+  --navy: #1b2350;          /* 制服外套深藍 */
+  --gold: #f2b705;          /* 校園黃 */
+  --panel: rgba(250, 251, 255, 0.94);
+  --panel-solid: #fafbff;
+  --ink: #1b2350;
+  --ink-soft: #545b7d;
+  --line: rgba(27, 35, 80, 0.14);
+  --chip: #eef0f8;
+  --f4: #6cc48a; --f3: #6aa9e6; --f2: #ef8fb5; --f1: #f5a85a;   /* 校園位置圖的樓層色 */
+  --font-display: "Huninn", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --shadow: 0 6px 24px rgba(20, 28, 70, 0.18);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --panel: rgba(22, 27, 52, 0.92); --panel-solid: #161b34;
+    --ink: #eef0ff; --ink-soft: #aab0d4; --line: rgba(238, 240, 255, 0.16);
+    --chip: #252b4e; --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --panel: rgba(22, 27, 52, 0.92); --panel-solid: #161b34;
+  --ink: #eef0ff; --ink-soft: #aab0d4; --line: rgba(238, 240, 255, 0.16);
+  --chip: #252b4e; --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: #a9cdee; color: var(--ink); font-family: var(--font-body); overflow: hidden; }
+#app { position: relative; width: 100%; height: 100%; }
+canvas#view { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
+
+.brand {
+  position: absolute; top: 12px; left: max(16px, env(safe-area-inset-left, 0px));
+  background: var(--panel); border-radius: 14px; padding: 10px 14px; box-shadow: var(--shadow);
+  display: flex; align-items: center; gap: 10px; max-width: calc(100% - 32px);
+}
+.brand .seal {
+  width: 34px; height: 34px; border-radius: 50%; background: var(--navy); color: var(--gold);
+  display: grid; place-items: center; font-family: var(--font-display); font-size: 18px; flex: none;
+  border: 2px solid var(--gold);
+}
+.brand h1 { margin: 0; font-family: var(--font-display); font-size: 19px; font-weight: 400; letter-spacing: 0.04em; text-wrap: balance; }
+.brand p { margin: 2px 0 0; font-size: 12px; color: var(--ink-soft); }
+
+.dock {
+  position: absolute; left: 0; right: 0; bottom: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none;
+}
+.dock > * { pointer-events: auto; }
+.bldgs { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; background: var(--panel); padding: 6px; border-radius: 999px; box-shadow: var(--shadow); max-width: 100%; }
+.bldgs button {
+  font: 500 14px var(--font-body); color: var(--ink); background: transparent; border: 0; border-radius: 999px;
+  padding: 7px 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; white-space: nowrap;
+}
+.bldgs button b { font-family: var(--font-display); font-weight: 400; background: var(--navy); color: var(--gold); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; }
+.bldgs button:hover, .bldgs button[aria-pressed="true"] { background: var(--chip); }
+.bldgs button:focus-visible, .near:focus-visible, .close:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.hint { font-size: 12px; color: var(--ink-soft); background: var(--panel); padding: 5px 12px; border-radius: 999px; box-shadow: var(--shadow); text-align: center; }
+.hint { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.floor-pill { background: var(--navy); color: #fff; border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+.floor-pill b { color: var(--gold); font-family: var(--font-display); font-weight: 400; font-size: 14px; }
+.near {
+  font: 700 15px var(--font-body); color: var(--navy); background: var(--gold); border: 0; border-radius: 999px;
+  padding: 10px 18px; cursor: pointer; box-shadow: var(--shadow);
+}
+
+.labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.tag {
+  position: absolute; transform: translate(-50%, -100%); white-space: nowrap;
+  background: var(--navy); color: #fff; font: 500 13px var(--font-body); padding: 4px 10px 4px 4px; border-radius: 999px;
+  display: flex; align-items: center; gap: 6px; box-shadow: 0 3px 10px rgba(0,0,0,.25); pointer-events: auto; cursor: pointer;
+}
+.tag b { background: var(--gold); color: var(--navy); width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-display); font-weight: 400; }
+.tag::after { content: ""; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--navy); border-bottom: 0; }
+
+.panel {
+  position: absolute; top: 12px; right: max(16px, env(safe-area-inset-right, 0px)); width: min(360px, calc(100% - 32px));
+  max-height: calc(100% - 140px); overflow: auto; background: var(--panel-solid); border-radius: 16px; box-shadow: var(--shadow);
+  padding: 16px; display: flex; flex-direction: column; gap: 12px;
+}
+.panel header { display: flex; align-items: center; gap: 10px; }
+.panel header .letter { width: 40px; height: 40px; border-radius: 12px; background: var(--navy); color: var(--gold); display: grid; place-items: center; font: 22px var(--font-display); flex: none; }
+.panel h2 { margin: 0; font: 400 22px var(--font-display); letter-spacing: 0.04em; }
+.panel header small { display: block; color: var(--ink-soft); font-size: 12px; margin-top: 2px; }
+.close { margin-left: auto; background: var(--chip); color: var(--ink); border: 0; border-radius: 10px; width: 34px; height: 34px; font-size: 18px; cursor: pointer; flex: none; }
+.floors { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.floors li { display: grid; grid-template-columns: 40px 1fr; gap: 10px; align-items: start; }
+.fl { font: 400 15px var(--font-display); color: #1b2350; border-radius: 8px; text-align: center; padding: 5px 0; font-variant-numeric: tabular-nums; }
+.rooms { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.rooms span { background: var(--chip); border-radius: 6px; padding: 3px 7px; font-size: 13px; line-height: 1.4; }
+.note { font-size: 13px; color: var(--ink-soft); border-top: 1px solid var(--line); padding-top: 10px; margin: 0; }
+
+.loading { position: absolute; inset: 0; display: grid; place-items: center; background: #a9cdee; color: #1b2350; font: 400 20px var(--font-display); }
+.loading .bar { width: 200px; height: 6px; background: rgba(27,35,80,.15); border-radius: 3px; margin-top: 12px; overflow: hidden; }
+.loading .bar i { display: block; height: 100%; width: 0; background: #1b2350; transition: width .2s; }
+
+@media (max-width: 640px) {
+  .panel { top: auto; bottom: 0; right: 0; left: 0; width: 100%; max-height: 55%; border-radius: 16px 16px 0 0;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 5; }
+  .bldgs button span { display: none; }
+  .brand h1 { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .loading .bar i { transition: none; } }
+</style>
+
+<div id="app">
+  <canvas id="view" tabindex="0" aria-label="忠孝國中 3D 校園，可用方向鍵或 WASD 移動主角"></canvas>
+  <div class="labels" id="labels"></div>
+
+  <div class="brand">
+    <div class="seal">孝</div>
+    <div>
+      <h1>新北市立忠孝國中・3D 校園</h1>
+      <p>帶著忠孝娃走走看，點大樓查看各樓層</p>
+    </div>
+  </div>
+
+  <aside class="panel" id="panel" hidden aria-live="polite">
+    <header>
+      <div class="letter" id="pLetter">D</div>
+      <div><h2 id="pName">望德樓</h2><small id="pSub">4 層樓</small></div>
+      <button class="close" id="pClose" aria-label="關閉樓層資訊">×</button>
+    </header>
+    <ul class="floors" id="pFloors"></ul>
+    <p class="note" id="pNote" hidden></p>
+  </aside>
+
+  <div class="dock">
+    <button class="near" id="near" hidden>查看 D 望德樓</button>
+    <nav class="bldgs" id="bldgs" aria-label="走到大樓"></nav>
+    <div class="hint" id="hint"><span class="floor-pill">目前 <b id="floor">1F</b></span>WASD／方向鍵移動・走樓梯可上 2～4F・點地面或走廊走過去・點大樓看樓層</div>
+  </div>
+
+  <div class="loading" id="loading"><div>載入校園中…<div class="bar"><i id="bar"></i></div></div></div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const FLOOR_COLOR = { "4F": "var(--f4)", "3F": "var(--f3)", "2F": "var(--f2)", "1F": "var(--f1)" };
+const GIRL_SCALE = 1.45;     // 校園 1 單位 = 1 公尺（依竣工圖實際尺寸），樓高 3.88m
+const SPEED = 10;
+
+const canvas = document.getElementById("view");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const SKY = new THREE.Color(0xa9cdee);
+scene.background = SKY;
+scene.fog = new THREE.Fog(SKY, 260, 560);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.5, 1000);
+camera.position.set(97, 48, 42);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.46;
+controls.minDistance = 8; controls.maxDistance = 280;
+controls.target.set(97, 2, -16);
+
+scene.add(new THREE.HemisphereLight(0xeaf4ff, 0x5d7f52, 1.4));
+const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+sun.position.set(140, 120, 20); sun.target.position.set(80, 0, -60); scene.add(sun.target);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -130, right: 130, top: 130, bottom: -130, near: 10, far: 450 });
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+
+// ---------- 載入 ----------
+const manager = new THREE.LoadingManager();
+manager.onProgress = (_u, done, total) => { document.getElementById("bar").style.width = (done / total * 100) + "%"; };
+const loader = new GLTFLoader(manager);
+const load = (url) => {
+  const b64 = window.__MODELS?.[url];
+  if (b64) {   // 預覽版：模型內嵌在 models.js
+    const bin = atob(b64), buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    return new Promise((res, rej) => loader.parse(buf.buffer, "", res, rej));
+  }
+  return new Promise((res, rej) => loader.load(url, res, undefined, rej));   // 正式版：直接讀 .glb
+};
+
+const labelsEl = document.getElementById("labels");
+const order = ["A", "B", "C", "D", "E"];
+let INFO = {};
+const buildings = {};   // key -> { name, boxes:[], anchor, objects:[] }
+let ground = null, navMesh = null, girl = null, mixer = null, actions = [];
+
+try {
+  const [campus, girlGltf, info] = await Promise.all([
+    load("campus_all.glb"), load("student_girl.glb"),
+    fetch("buildings.json").then(r => r.json())
+  ]);
+  INFO = info;
+  scene.add(campus.scene);
+  campus.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  campus.scene.updateMatrixWorld(true);
+  navMesh = campus.scene.getObjectByName("NAV_walkable");
+  if (navMesh) {   // 可行走面：不顯示，只拿來判斷高度
+    navMesh.traverse(o => { if (o.isMesh) { o.material = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }); o.castShadow = o.receiveShadow = false; } });
+  }
+  for (const node of campus.scene.children) {
+    if (node.name.startsWith("地面")) ground = node;
+    const m = node.name.match(/^([A-E])_/);
+    if (!m) continue;
+    const key = m[1];
+    const box = new THREE.Box3().setFromObject(node);
+    const b = buildings[key] ||= { key, name: INFO[key]?.名稱 ?? key, boxes: [], objects: [] };
+    b.boxes.push(box); b.objects.push(node);
+    b.mats ||= [];
+    node.traverse(o => {
+      o.userData.bkey = key;
+      if (o.isMesh) { o.material = o.material.clone(); b.mats.push(o.material); }
+    });
+  }
+  for (const b of Object.values(buildings)) {
+    const u = b.boxes.reduce((a, c) => a.union(c), new THREE.Box3().copy(b.boxes[0]));
+    b.union = u;
+    b.anchor = new THREE.Vector3((u.min.x + u.max.x) / 2, u.max.y + 2.5, (u.min.z + u.max.z) / 2);
+  }
+
+  girl = girlGltf.scene;
+  girl.scale.setScalar(GIRL_SCALE);
+  girl.position.set(97, 0, -6);
+  girl.rotation.y = Math.PI;      // 面向校園內（北）
+  girl.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  scene.add(girl);
+  mixer = new THREE.AnimationMixer(girl);
+  actions = girlGltf.animations.map(c => { const a = mixer.clipAction(c); a.play(); return a; });
+  setIdlePose();
+
+  buildUI();
+  document.getElementById("loading").hidden = true;
+} catch (err) {
+  document.getElementById("loading").innerHTML = "<div style='text-align:center;padding:0 16px'>模型載入失敗<br><small>" + (err?.message ?? err) + "</small></div>";
+  console.error(err);
+}
+
+function setIdlePose() { for (const a of actions) a.time = 0.25; mixer?.update(0); }
+
+// ---------- UI ----------
+function buildUI() {
+  const nav = document.getElementById("bldgs");
+  for (const key of order) {
+    const b = buildings[key]; if (!b) continue;
+    const btn = document.createElement("button");
+    btn.innerHTML = `<b>${key}</b><span>${b.name}</span>`;
+    btn.title = "走到 " + key + " " + b.name;
+    btn.addEventListener("click", () => { walkToBuilding(key); openPanel(key); });
+    nav.appendChild(btn); b.btn = btn;
+    const tag = document.createElement("div");
+    tag.className = "tag";
+    tag.innerHTML = `<b>${key}</b>${b.name}${key === "E" ? "・活動中心" : ""}`;
+    tag.addEventListener("click", () => openPanel(key));
+    labelsEl.appendChild(tag); b.tag = tag;
+  }
+}
+
+const panel = document.getElementById("panel");
+let openKey = null;
+function openPanel(key) {
+  const d = INFO[key]; if (!d) return;
+  openKey = key;
+  document.getElementById("pLetter").textContent = key;
+  document.getElementById("pName").textContent = d.名稱 + (key === "E" ? "（活動中心）" : "");
+  document.getElementById("pSub").textContent = d.樓層數 + " 層樓";
+  const ul = document.getElementById("pFloors"); ul.innerHTML = "";
+  for (const fl of ["4F", "3F", "2F", "1F"]) {
+    if (!d.樓層[fl]) continue;
+    const li = document.createElement("li");
+    const rooms = d.樓層[fl].split("、").map(r => `<span>${r}</span>`).join("");
+    li.innerHTML = `<div class="fl" style="background:${FLOOR_COLOR[fl]}">${fl}</div><div class="rooms">${rooms}</div>`;
+    ul.appendChild(li);
+  }
+  const note = document.getElementById("pNote");
+  note.hidden = !d.備註; note.textContent = d.備註 || "";
+  panel.hidden = false;
+  for (const k of order) buildings[k]?.btn?.setAttribute("aria-pressed", String(k === key));
+}
+document.getElementById("pClose").addEventListener("click", () => {
+  panel.hidden = true; openKey = null;
+  for (const k of order) buildings[k]?.btn?.setAttribute("aria-pressed", "false");
+  canvas.focus();
+});
+const nearBtn = document.getElementById("near");
+let nearKey = null;
+nearBtn.addEventListener("click", () => nearKey && openPanel(nearKey));
+
+// ---------- 移動 ----------
+const keys = new Set();
+addEventListener("keydown", e => {
+  if (e.target.closest?.("button") && (e.key === "Enter" || e.key === " ")) return;
+  const k = e.key.toLowerCase();
+  if (["w","a","s","d","arrowup","arrowdown","arrowleft","arrowright"].includes(k)) { keys.add(k); target = null; e.preventDefault(); }
+  if ((k === "e" || k === "enter") && nearKey) openPanel(nearKey);
+  if (k === "escape") document.getElementById("pClose").click();
+});
+addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
+addEventListener("blur", () => keys.clear());
+
+let target = null;
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let downAt = null;
+canvas.addEventListener("pointerdown", e => { downAt = { x: e.clientX, y: e.clientY }; });
+canvas.addEventListener("pointerup", e => {
+  if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 6) return;
+  const r = canvas.getBoundingClientRect();
+  ndc.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const bHit = ray.intersectObjects(Object.values(buildings).flatMap(b => b.objects), true)
+    .find(h => h.object.material.opacity > 0.5);
+  const nHit = navMesh ? ray.intersectObject(navMesh, true)[0] : null;
+  if (nHit && (!bHit || nHit.distance <= bHit.distance + 0.6)) { target = nHit.point.clone(); return; }
+  if (bHit) openPanel(bHit.object.userData.bkey);
+});
+
+// 依「可行走面」判斷能不能走：往下打一條射線找腳下的地板，高低差太大就是牆或邊緣
+const downRay = new THREE.Raycaster(); downRay.far = 1.9;
+const DOWN = new THREE.Vector3(0, -1, 0), probe = new THREE.Vector3();
+function heightAt(x, z, y) {
+  if (!navMesh) return y;
+  probe.set(x, y + 0.9, z);
+  downRay.set(probe, DOWN);
+  const hit = downRay.intersectObject(navMesh, true)[0];
+  if (!hit) return null;
+  return Math.abs(hit.point.y - y) <= 0.8 ? hit.point.y : null;
+}
+function walkToBuilding(key) {
+  const u = buildings[key].union;
+  // 走到大樓靠中央廊道或南側的出入口前
+  // 走到各棟一樓入口（竣工圖座標：three.js 的 z = -北向距離）
+  const spots = { A: [14.3, -39], B: [29.3, -39], C: [58.1, -42], D: [97, -36], E: [125.9, -17] };
+  const [sx, sz] = spots[key] || [(u.min.x + u.max.x) / 2, u.max.z + 2.5];
+  const p = new THREE.Vector3(sx, 0, sz);
+  target = p;
+}
+
+const camDelta = new THREE.Vector3();
+function moveGirl(dt) {
+  if (!girl) return false;
+  let dx = 0, dz = 0;
+  const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+  const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  if (keys.has("w") || keys.has("arrowup")) { dx += fwd.x; dz += fwd.z; }
+  if (keys.has("s") || keys.has("arrowdown")) { dx -= fwd.x; dz -= fwd.z; }
+  if (keys.has("d") || keys.has("arrowright")) { dx += right.x; dz += right.z; }
+  if (keys.has("a") || keys.has("arrowleft")) { dx -= right.x; dz -= right.z; }
+  if (!dx && !dz && target) {
+    dx = target.x - girl.position.x; dz = target.z - girl.position.z;
+    if (Math.hypot(dx, dz) < 0.4) { target = null; return false; }
+  }
+  const len = Math.hypot(dx, dz);
+  if (!len) return false;
+  dx /= len; dz /= len;
+  const step = Math.min(SPEED * dt, target && !keys.size ? Math.hypot(target.x - girl.position.x, target.z - girl.position.z) : Infinity);
+  const ox = girl.position.x, oy = girl.position.y, oz = girl.position.z;
+  let nx = ox + dx * step, nz = oz + dz * step;
+  let ny = heightAt(nx, nz, oy);
+  if (ny === null) {                       // 卡住時沿牆滑動
+    ny = heightAt(nx, oz, oy);
+    if (ny !== null) nz = oz;
+    else {
+      ny = heightAt(ox, nz, oy);
+      if (ny !== null) nx = ox;
+      else { target = null; return false; }
+    }
+  }
+  girl.position.set(nx, ny, nz);
+  girl.rotation.y = Math.atan2(dx, dz);
+  camDelta.set(nx - ox, ny - oy, nz - oz);
+  camera.position.add(camDelta); controls.target.add(camDelta);
+  return true;
+}
+
+// 主角在某棟樓的範圍內（走廊、陽台、樓梯旁）時，把那棟樓變半透明
+let fadedKey = null;
+function updateFade() {
+  if (!girl) return;
+  let k = null;
+  for (const b of Object.values(buildings)) {
+    const u = b.union, p = girl.position;
+    if (p.x > u.min.x - 2 && p.x < u.max.x + 2 && p.z > u.min.z - 2 && p.z < u.max.z + 2 && (p.y > 0.5 || b.key === "A" || b.key === "B")) { k = b.key; break; }
+  }
+  if (k === fadedKey) return;
+  for (const [key, on] of [[fadedKey, false], [k, true]]) {
+    if (!key) continue;
+    for (const m of buildings[key].mats) { m.transparent = on; m.opacity = on ? 0.28 : 1; m.depthWrite = !on; m.needsUpdate = true; }
+  }
+  fadedKey = k;
+}
+const floorEl = document.getElementById("floor");
+let lastFloor = "";
+function updateFloor() {
+  if (!girl) return;
+  const y = girl.position.y;
+  const lv = [0, 3.88, 4.8, 7.76, 8.3, 11.64];        // 一般棟 1~4F 與向陽樓 2F、3F 的樓板高
+  const fl = ["1F", "2F", "2F", "3F", "3F", "4F"];
+  let i = 0; for (let k = 1; k < lv.length; k++) if (Math.abs(lv[k] - y) < Math.abs(lv[i] - y)) i = k;
+  const f = fl[i];
+  const onStair = Math.abs(lv[i] - y) > 0.15;
+  const txt = onStair ? "樓梯上" : f;
+  if (txt !== lastFloor) { floorEl.textContent = txt; lastFloor = txt; }
+}
+
+function updateNear() {
+  if (!girl) return;
+  let best = null, bestD = 4.5;
+  for (const b of Object.values(buildings))
+    for (const bx of b.boxes) {
+      const cx = Math.max(bx.min.x, Math.min(girl.position.x, bx.max.x));
+      const cz = Math.max(bx.min.z, Math.min(girl.position.z, bx.max.z));
+      const d = Math.hypot(girl.position.x - cx, girl.position.z - cz);
+      if (d < bestD) { bestD = d; best = b.key; }
+    }
+  if (best !== nearKey) {
+    nearKey = best;
+    nearBtn.hidden = !best;
+    if (best) nearBtn.textContent = `查看 ${best} ${buildings[best].name}（E 鍵）`;
+  }
+}
+
+const v = new THREE.Vector3();
+function updateLabels() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  for (const b of Object.values(buildings)) {
+    if (!b.tag) continue;
+    v.copy(b.anchor).project(camera);
+    const show = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
+    b.tag.hidden = !show;
+    if (show) { b.tag.style.left = ((v.x + 1) / 2 * w) + "px"; b.tag.style.top = ((1 - v.y) / 2 * h) + "px"; }
+  }
+}
+
+function resize() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+
+const clock = new THREE.Clock();
+let walking = false;
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const moved = moveGirl(dt);
+  if (mixer) {
+    if (moved) { mixer.update(dt * 1.6); walking = true; }
+    else if (walking) { setIdlePose(); walking = false; }
+  }
+  updateNear(); updateFade(); updateFloor();
+  controls.update();
+  renderer.render(scene, camera);
+  updateLabels();
+});
+canvas.focus();
+</script>
+
+</body>
+</html>
