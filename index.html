@@ -77,6 +77,9 @@ canvas#view { display: block; width: 100%; height: 100%; touch-action: none; out
 .hint { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .floor-pill { background: var(--navy); color: #fff; border-radius: 999px; padding: 2px 10px; font-size: 12px; }
 .floor-pill b { color: var(--gold); font-family: var(--font-display); font-weight: 400; font-size: 14px; }
+.cam-btn { font: 500 14px var(--font-body); color: #fff; background: var(--navy); border: 0; border-radius: 999px; padding: 8px 14px; cursor: pointer; box-shadow: var(--shadow); display: flex; align-items: center; gap: 8px; }
+.cam-btn kbd { font: 12px var(--font-body); background: var(--gold); color: var(--navy); border-radius: 5px; padding: 1px 5px; }
+.cam-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 .near {
   font: 700 15px var(--font-body); color: var(--navy); background: var(--gold); border: 0; border-radius: 999px;
   padding: 10px 18px; cursor: pointer; box-shadow: var(--shadow);
@@ -146,6 +149,7 @@ canvas#view { display: block; width: 100%; height: 100%; touch-action: none; out
 
   <div class="dock">
     <button class="near" id="near" hidden>查看 D 望德樓</button>
+    <button class="cam-btn" id="camBtn" title="切換視角（F1 或 V 鍵）">視角：環繞 <kbd>F1</kbd></button>
     <nav class="bldgs" id="bldgs" aria-label="走到大樓"></nav>
     <div class="hint" id="hint"><span class="floor-pill">目前 <b id="floor">1F</b></span>WASD／方向鍵移動・走樓梯可上 2～4F・點地面或走廊走過去・點大樓看樓層</div>
   </div>
@@ -215,6 +219,7 @@ const order = ["A", "B", "C", "D", "E"];
 let INFO = {};
 const buildings = {};   // key -> { name, boxes:[], anchor, objects:[] }
 let ground = null, navMesh = null, girl = null, mixer = null, actions = [];
+const collidables = [];
 
 try {
   const [campus, girlGltf, info] = await Promise.all([
@@ -229,6 +234,9 @@ try {
   if (navMesh) {   // 可行走面：不顯示，只拿來判斷高度
     navMesh.traverse(o => { if (o.isMesh) { o.material = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }); o.castShadow = o.receiveShadow = false; } });
   }
+  campus.scene.traverse(o => {                     // 跟隨視角用：鏡頭碰到這些就往前縮
+    if (o.isMesh && !/NAV|樹木|地面/.test(o.name + (o.parent?.name || ""))) collidables.push(o);
+  });
   for (const node of campus.scene.children) {
     if (node.name.startsWith("地面")) ground = node;
     const m = node.name.match(/^([A-E])_/);
@@ -324,7 +332,9 @@ addEventListener("keydown", e => {
   if (["w","a","s","d","arrowup","arrowdown","arrowleft","arrowright"].includes(k)) { keys.add(k); target = null; e.preventDefault(); }
   if ((k === "e" || k === "enter") && nearKey) openPanel(nearKey);
   if (k === "escape") document.getElementById("pClose").click();
+  if (e.key === "F1" || k === "v") { e.preventDefault(); cycleCam(); }
 });
+addEventListener("help", e => e.preventDefault());
 addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
 addEventListener("blur", () => keys.clear());
 
@@ -369,12 +379,24 @@ const camDelta = new THREE.Vector3();
 function moveGirl(dt) {
   if (!girl) return false;
   let dx = 0, dz = 0;
-  const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
-  const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
-  if (keys.has("w") || keys.has("arrowup")) { dx += fwd.x; dz += fwd.z; }
-  if (keys.has("s") || keys.has("arrowdown")) { dx -= fwd.x; dz -= fwd.z; }
-  if (keys.has("d") || keys.has("arrowright")) { dx += right.x; dz += right.z; }
-  if (keys.has("a") || keys.has("arrowleft")) { dx -= right.x; dz -= right.z; }
+  const up = keys.has("w") || keys.has("arrowup"), down = keys.has("s") || keys.has("arrowdown");
+  const left = keys.has("a") || keys.has("arrowleft"), rightK = keys.has("d") || keys.has("arrowright");
+  if (camMode > 0) {
+    // 跟隨／第一人稱：A、D 轉向，W、S 前進後退（鏡頭永遠在她身後，爬樓梯不會亂轉）
+    if (left) heading += 2.6 * dt;
+    if (rightK) heading -= 2.6 * dt;
+    const fx = Math.sin(heading), fz = Math.cos(heading);
+    if (up) { dx += fx; dz += fz; }
+    if (down) { dx -= fx * 0.6; dz -= fz * 0.6; }
+    if ((left || rightK) && !up && !down) girl.rotation.y = heading;
+  } else {
+    const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+    const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+    if (up) { dx += fwd.x; dz += fwd.z; }
+    if (down) { dx -= fwd.x; dz -= fwd.z; }
+    if (rightK) { dx += right.x; dz += right.z; }
+    if (left) { dx -= right.x; dz -= right.z; }
+  }
   if (!dx && !dz && target) {
     dx = target.x - girl.position.x; dz = target.z - girl.position.z;
     if (Math.hypot(dx, dz) < 0.4) { target = null; return false; }
@@ -396,9 +418,10 @@ function moveGirl(dt) {
     }
   }
   girl.position.set(nx, ny, nz);
-  girl.rotation.y = Math.atan2(dx, dz);
+  if (camMode > 0 && (keys.size || !target)) girl.rotation.y = heading;
+  else { girl.rotation.y = Math.atan2(dx, dz); heading = girl.rotation.y; }
   camDelta.set(nx - ox, ny - oy, nz - oz);
-  camera.position.add(camDelta); controls.target.add(camDelta);
+  if (camMode === 0) { camera.position.add(camDelta); controls.target.add(camDelta); }
   return true;
 }
 
@@ -461,6 +484,67 @@ function updateLabels() {
   }
 }
 
+// ---------- 視角切換（F1 / V / 按鈕）：環繞 → 跟隨 → 第一人稱 ----------
+const CAM_NAMES = ["環繞", "跟隨", "第一人稱"];
+const CAM_HINTS = [
+  "WASD／方向鍵移動・拖曳旋轉鏡頭・點地面或走廊走過去・點大樓看樓層",
+  "W／S 前進後退・A／D 轉向・滾輪調整距離・拖曳左右看・爬樓梯建議用這個",
+  "W／S 前進後退・A／D 轉向・拖曳左右看・在走廊和樓梯間最清楚",
+];
+let camMode = 0, heading = Math.PI, followDist = 6.5, lookYaw = 0;
+const savedOrbit = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
+const camBtn = document.getElementById("camBtn");
+const hintText = document.getElementById("hint");
+function cycleCam() {
+  if (!girl) return;
+  if (camMode === 0) { savedOrbit.pos.copy(camera.position).sub(controls.target); }
+  camMode = (camMode + 1) % 3;
+  heading = girl.rotation.y; lookYaw = 0;
+  controls.enabled = camMode === 0;
+  girl.visible = camMode !== 2;
+  if (camMode === 0) {
+    controls.target.set(girl.position.x, girl.position.y + 2, girl.position.z);
+    camera.position.copy(controls.target).add(savedOrbit.pos.lengthSq() ? savedOrbit.pos : new THREE.Vector3(0, 30, 34));
+  }
+  camera.near = camMode === 2 ? 0.08 : 0.3; camera.updateProjectionMatrix();
+  camBtn.innerHTML = `視角：${CAM_NAMES[camMode]} <kbd>F1</kbd>`;
+  hintText.lastChild.textContent = CAM_HINTS[camMode];
+}
+camBtn.addEventListener("click", () => { cycleCam(); canvas.focus(); });
+canvas.addEventListener("wheel", e => {
+  if (camMode === 1) { followDist = Math.min(14, Math.max(2.5, followDist + Math.sign(e.deltaY) * 0.8)); e.preventDefault(); }
+}, { passive: false });
+let dragX = null;
+canvas.addEventListener("pointerdown", e => { if (camMode > 0) dragX = e.clientX; });
+addEventListener("pointermove", e => {
+  if (camMode > 0 && dragX !== null && e.buttons) { lookYaw -= (e.clientX - dragX) * 0.006; dragX = e.clientX; }
+});
+addEventListener("pointerup", () => { dragX = null; });
+
+const camRay = new THREE.Raycaster();
+const head = new THREE.Vector3(), want = new THREE.Vector3(), dirV = new THREE.Vector3(), lookAt = new THREE.Vector3();
+function updateCamera(dt) {
+  if (camMode === 0 || !girl) return;
+  lookYaw *= Math.exp(-dt * 0.8);                 // 放開滑鼠後慢慢回到她身後
+  const h = heading + lookYaw;
+  const fx = Math.sin(h), fz = Math.cos(h);
+  const p = girl.position;
+  if (camMode === 1) {
+    head.set(p.x, p.y + 2.2, p.z);
+    want.set(p.x - fx * followDist, p.y + 1.6 + followDist * 0.28, p.z - fz * followDist);
+    dirV.copy(want).sub(head); const full = dirV.length(); dirV.normalize();
+    camRay.set(head, dirV); camRay.far = full;
+    const hit = camRay.intersectObjects(collidables, false).find(x => x.object.material.opacity > 0.5);
+    if (hit) want.copy(head).addScaledVector(dirV, Math.max(0.6, hit.distance - 0.35));   // 被牆或樓板擋到就把鏡頭拉近
+    camera.position.lerp(want, 1 - Math.exp(-dt * 8));
+    lookAt.set(p.x + fx * 2.5, p.y + 1.5, p.z + fz * 2.5);
+  } else {
+    camera.position.set(p.x + fx * 0.15, p.y + 2.05, p.z + fz * 0.15);
+    lookAt.set(p.x + fx * 6, p.y + 1.3, p.z + fz * 6);   // 視線略往下，看得到階梯
+  }
+  camera.lookAt(lookAt);
+}
+
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   renderer.setSize(w, h, false);
@@ -478,7 +562,7 @@ renderer.setAnimationLoop(() => {
     else if (walking) { setIdlePose(); walking = false; }
   }
   updateNear(); updateFade(); updateFloor();
-  controls.update();
+  if (camMode === 0) controls.update(); else updateCamera(dt);
   renderer.render(scene, camera);
   updateLabels();
 });
