@@ -648,7 +648,7 @@ function buildSampleRoom() {
   const nm = new THREE.Mesh(ng, new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
   scene.add(nm); navObjs.push(nm);
   // 導航：走廊門口 → 前門 → 講台前
-  INTERIORS["3B805"] = { floor: FL, path: [[X0 - 0.6, 64.95], [X0 + 0.6, 64.95], [X0 + 1.2, 65.6], [cx - 1.2, 65.8], [cx, 66.0]] };
+  INTERIORS["3B805"] = { floor: FL, camTarget: [cx, 66.8, 1.1], camPos: [X1 - 0.5, Y1 - 0.5, 2.9], path: [[X0 - 0.6, 64.95], [X0 + 0.6, 64.95], [X0 + 1.2, 65.6], [cx - 1.2, 65.8], [cx, 66.0]] };
 }
 
 // ---------- 教室導航：從校門口沿可行走面走到教室門口 ----------
@@ -768,6 +768,7 @@ function remaining() {
 async function guideTo(r) {
   if (!girl) return;
   guideEl.hidden = false; gText.textContent = "規劃路線中…";
+  controls.minDistance = 8;
   try { await loadNav(); } catch (e) { gText.textContent = "這個瀏覽器不支援導航資料，請改用 Chrome 或 Edge。"; return; }
   const yLv = r.z, tgt = nearestNode(r.dx, -r.dy, yLv, 0.7);
   if (tgt < 0 || NAV.start < 0) { gText.textContent = `找不到通往 ${r.n} 的路。`; return; }
@@ -821,11 +822,15 @@ function arrive() {
   const r = routeRoom; route = null;
   gText.innerHTML = `到了！這裡是 <b>${r.b} ${buildings[r.b]?.name ?? ""} ${r.f}F ${r.n}</b>`;
   const inside = INTERIORS[r.f + r.b + r.n];
-  if (inside) {             // 站上講台、面向全班，鏡頭切到跟隨
+  if (inside) {             // 站在講台前面向全班；鏡頭放到教室後方角落，看得到整間教室
     girl.rotation.y = heading = Math.PI;
-    while (camMode !== 1) cycleCam();
-    followDist = 4.5; lookYaw = 0;
-    gText.innerHTML += "・這是樣板教室，可以用 W／S 前後走、A／D 轉向逛逛";
+    marker.visible = false; pinEl.hidden = true; if (routeMesh) routeMesh.visible = false;
+    while (camMode !== 0) cycleCam();
+    controls.minDistance = 2;
+    const [tx, ty, th] = inside.camTarget, [px, py, ph] = inside.camPos;
+    controls.target.set(tx, inside.floor + th, -ty);
+    camera.position.set(px, inside.floor + ph, -py);
+    gText.innerHTML += "・這是樣板教室，拖曳可以轉動視角，WASD 可以在教室裡走";
   }
 }
 function stopGuide(msg) {
