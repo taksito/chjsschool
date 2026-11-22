@@ -239,6 +239,7 @@ const roomLabel = r => `${r.n}｜${r.b} ${({A:"愛學樓",B:"集賢樓",C:"築�
 const buildings = {};   // key -> { name, boxes:[], anchor, objects:[] }
 let ground = null, navMesh = null, girl = null, mixer = null, actions = [];
 const collidables = [];
+const navObjs = [];       // 可行走面（校園＋教室內部）
 
 try {
   const [campus, girlGltf, info] = await Promise.all([
@@ -252,6 +253,7 @@ try {
   navMesh = campus.scene.getObjectByName("NAV_walkable");
   if (navMesh) {   // 可行走面：不顯示，只拿來判斷高度
     navMesh.traverse(o => { if (o.isMesh) { o.material = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }); o.castShadow = o.receiveShadow = false; } });
+    navObjs.push(navMesh);
   }
   campus.scene.traverse(o => {                     // 跟隨視角用：鏡頭碰到這些就往前縮
     if (o.isMesh && !/NAV|樹木|地面/.test(o.name + (o.parent?.name || ""))) collidables.push(o);
@@ -378,7 +380,7 @@ canvas.addEventListener("pointerup", e => {
   ray.setFromCamera(ndc, camera);
   const bHit = ray.intersectObjects(Object.values(buildings).flatMap(b => b.objects), true)
     .find(h => h.object.material.opacity > 0.5);
-  const nHit = navMesh ? ray.intersectObject(navMesh, true)[0] : null;
+  const nHit = navMesh ? ray.intersectObjects(navObjs, true)[0] : null;
   if (nHit && (!bHit || nHit.distance <= bHit.distance + 0.6)) { if (route) stopGuide("你接手了，導航先停下來。"); target = nHit.point.clone(); return; }
   if (bHit) openPanel(bHit.object.userData.bkey);
 });
@@ -390,7 +392,7 @@ function heightAt(x, z, y) {
   if (!navMesh) return y;
   probe.set(x, y + 0.9, z);
   downRay.set(probe, DOWN);
-  const hit = downRay.intersectObject(navMesh, true)[0];
+  const hit = downRay.intersectObjects(navObjs, true)[0];
   if (!hit) return null;
   return Math.abs(hit.point.y - y) <= 0.8 ? hit.point.y : null;
 }
@@ -515,6 +517,140 @@ function updateLabels() {
 }
 
 
+
+// ---------- 樣板教室：集賢樓 3F 805（室內：黑板、講桌、30 套課桌椅、置物櫃、吊扇、門牌） ----------
+const INTERIORS = {};
+function canvasTex(w, h, draw) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+function buildSampleRoom() {
+  // 805 的位置：X 30.5～38.8（西側是走廊），Y 63.9～71.7，3F 樓板 7.76，天花板 11.24
+  const X0 = 30.5, X1 = 38.8, Y0 = 63.92, Y1 = 71.69, FL = 7.76, CH = 3.48, T = 0.12;
+  const g = new THREE.Group(); g.name = "樣板教室_805";
+  const mat = {}; const M = (hex) => mat[hex] ||= new THREE.MeshLambertMaterial({ color: hex });
+  const P = (X, Y, h) => new THREE.Vector3(X, FL + h, -Y);
+  const box = (X, Y, h, w, d, hh, color, parent = g) => {    // X,Y 為中心，h 為底面高
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), typeof color === "number" ? M(color) : color);
+    m.position.copy(P(X, Y, h + hh / 2)); parent.add(m); return m;
+  };
+  const xi0 = X0 + T, xi1 = X1 - T, yi0 = Y0 + T, yi1 = Y1 - T, cx = (X0 + X1) / 2;
+  // 地板、天花板
+  const floorTex = canvasTex(256, 256, (c, w, h) => {
+    c.fillStyle = "#d9cdb4"; c.fillRect(0, 0, w, h);
+    c.strokeStyle = "rgba(120,100,70,.35)"; c.lineWidth = 2;
+    for (let i = 0; i <= 4; i++) { c.beginPath(); c.moveTo(i * w / 4, 0); c.lineTo(i * w / 4, h); c.stroke(); c.beginPath(); c.moveTo(0, i * h / 4); c.lineTo(w, i * h / 4); c.stroke(); }
+  });
+  floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set((X1 - X0) / 2.4, (Y1 - Y0) / 2.4);
+  box(cx, (Y0 + Y1) / 2, 0, X1 - X0, Y1 - Y0, 0.012, new THREE.MeshLambertMaterial({ map: floorTex }));
+  box(cx, (Y0 + Y1) / 2, CH - 0.02, X1 - X0, Y1 - Y0, 0.02, 0xf4f4f0);
+  // 牆：前（南，黑板）、後（北，置物櫃）兩面實牆；走廊側與陽台側是窗台＋窗帶＋氣窗，走廊側留前後門
+  const WALL = 0xf1efe8, DOOR = [[64.45, 65.45], [70.15, 71.15]];
+  box(cx, Y0 + T / 2, 0, X1 - X0, T, CH, WALL);
+  box(cx, Y1 - T / 2, 0, X1 - X0, T, CH, WALL);
+  for (const [xw, isCorr] of [[X0 + T / 2, true], [X1 - T / 2, false]]) {
+    const segs = isCorr ? [[Y0, DOOR[0][0]], [DOOR[0][1], DOOR[1][0]], [DOOR[1][1], Y1]] : [[Y0, Y1]];
+    for (const [a, b] of segs) {
+      box(xw, (a + b) / 2, 0, T, b - a, 0.95, WALL);                       // 窗台以下
+      box(xw, (a + b) / 2, 0.95, T * 0.6, b - a, 0.05, 0xffffff);          // 窗框
+      const glass = new THREE.MeshLambertMaterial({ color: 0xbfe0f5, transparent: true, opacity: 0.25, depthWrite: false });
+      box(xw, (a + b) / 2, 1.0, 0.02, b - a, 1.5, glass);                   // 玻璃
+      for (let k = 0; k <= Math.round((b - a) / 1.2); k++) box(xw, a + (b - a) * k / Math.round((b - a) / 1.2), 1.0, T * 0.6, 0.05, 1.5, 0xffffff);
+    }
+    box(xw, (Y0 + Y1) / 2, 2.5, T, Y1 - Y0, CH - 2.5, WALL);              // 窗帶以上
+    if (isCorr) for (const [a, b] of DOOR) {                                // 門框＋拉開的木門
+      box(xw, a, 0, 0.16, 0.08, 2.5, 0x8a6a48); box(xw, b, 0, 0.16, 0.08, 2.5, 0x8a6a48);
+      box(xw + 0.12, b + 0.48, 0, 0.05, 0.95, 2.1, 0xb98d5f);
+    }
+  }
+  // 黑板（南牆）：綠板＋粉筆字
+  const boardTex = canvasTex(1024, 320, (c, w, h) => {
+    c.fillStyle = "#2f5a43"; c.fillRect(0, 0, w, h);
+    c.fillStyle = "rgba(255,255,255,.9)"; c.font = "bold 56px 'Noto Sans TC', sans-serif"; c.fillText("八年五班", 40, 80);
+    c.font = "40px 'Noto Sans TC', sans-serif"; c.fillText("今日值日生：1 號、2 號", 40, 150);
+    c.fillText("第一節 國文　第二節 數學　第三節 自然", 40, 215);
+    c.fillStyle = "rgba(255,240,150,.9)"; c.fillText("歡迎來到忠孝國中！", 600, 285);
+  });
+  box(cx, Y0 + T + 0.03, 0.85, 4.6, 0.06, 1.3, 0xffffff);
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 1.15), new THREE.MeshLambertMaterial({ map: boardTex }));
+  board.position.copy(P(cx, Y0 + T + 0.07, 0.85 + 0.65)); board.rotation.y = Math.PI; g.add(board);
+  box(cx, Y0 + T + 0.12, 0.85, 4.4, 0.1, 0.04, 0xcccccc);                // 粉筆槽
+  // 講桌、電視、時鐘
+  box(cx, Y0 + 1.25, 0, 1.2, 0.6, 1.0, 0x9c7650); box(cx, Y0 + 1.25, 1.0, 1.25, 0.65, 0.04, 0x6e5238);
+  box(X1 - 0.9, Y0 + T + 0.15, 2.0, 1.25, 0.08, 0.75, 0x222428);          // 壁掛電視
+  const clock = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.04, 24), M(0xffffff));
+  clock.rotation.x = Math.PI / 2; clock.position.copy(P(cx, Y0 + T + 0.03, 2.75)); g.add(clock);
+  // 後牆：置物櫃（30 格）＋布告欄
+  box(cx, yi1 - 0.2, 0, 6.2, 0.4, 1.15, 0xd8c39d);
+  for (let i = 0; i < 10; i++) for (let j = 0; j < 3; j++) box(cx - 3.1 + 0.31 + i * 0.62, yi1 - 0.41, 0.06 + j * 0.37, 0.56, 0.02, 0.32, [0x6fa8dc, 0xf6b26b, 0x93c47d][j]);
+  const boardBack = canvasTex(512, 200, (c, w, h) => {
+    c.fillStyle = "#c9a26b"; c.fillRect(0, 0, w, h);
+    const cols = ["#fff", "#ffe599", "#b6d7a8", "#9fc5e8", "#f4cccc"];
+    for (let i = 0; i < 9; i++) { c.fillStyle = cols[i % cols.length]; c.fillRect(20 + (i % 5) * 98, 20 + Math.floor(i / 5) * 90, 80, 70); }
+    c.fillStyle = "#1b2350"; c.font = "bold 26px 'Noto Sans TC', sans-serif"; c.fillText("班級公告", 400, 185);
+  });
+  const bb = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.2), new THREE.MeshLambertMaterial({ map: boardBack }));
+  bb.position.copy(P(cx, yi1 - 0.01, 1.45 + 0.6)); g.add(bb);
+  // 課桌椅：6 行 × 5 排，面向黑板（南）
+  const desks = [];
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 6; c++) desks.push([cx - 2.875 + c * 1.15, 66.55 + r * 0.98]);
+  const inst = (geo, material, list) => { const im = new THREE.InstancedMesh(geo, material, list.length); const m4 = new THREE.Matrix4();
+    list.forEach((p, i) => { m4.makeTranslation(p.x, p.y, p.z); im.setMatrixAt(i, m4); }); g.add(im); return im; };
+  const tops = [], legs = [], seats = [], backs = [], cleg = [], racks = [];
+  for (const [X, Y] of desks) {
+    tops.push(P(X, Y, 0.72)); racks.push(P(X, Y + 0.02, 0.56));
+    for (const [dx, dy] of [[-0.27, -0.19], [0.27, -0.19], [-0.27, 0.19], [0.27, 0.19]]) legs.push(P(X + dx, Y + dy, 0.36));
+    seats.push(P(X, Y + 0.48, 0.43)); backs.push(P(X, Y + 0.67, 0.7));
+    for (const [dx, dy] of [[-0.17, 0.32], [0.17, 0.32], [-0.17, 0.65], [0.17, 0.65]]) cleg.push(P(X + dx, Y + dy, 0.21));
+  }
+  inst(new THREE.BoxGeometry(0.6, 0.03, 0.45), M(0xe2c08d), tops);
+  inst(new THREE.BoxGeometry(0.56, 0.12, 0.38), M(0x7f8c98), racks);
+  inst(new THREE.BoxGeometry(0.03, 0.72, 0.03), M(0x6b7884), legs);
+  inst(new THREE.BoxGeometry(0.4, 0.03, 0.38), M(0xe2c08d), seats);
+  inst(new THREE.BoxGeometry(0.4, 0.3, 0.03), M(0xe2c08d), backs);
+  inst(new THREE.BoxGeometry(0.03, 0.43, 0.03), M(0x6b7884), cleg);
+  // 吊扇與日光燈
+  for (const [X, Y] of [[33.1, 66.6], [36.2, 66.6], [33.1, 69.6], [36.2, 69.6]]) {
+    box(X, Y, CH - 0.45, 0.06, 0.06, 0.45, 0xdddddd); box(X, Y, CH - 0.55, 0.22, 0.22, 0.12, 0xeeeeee);
+    for (let k = 0; k < 3; k++) { const bl = box(X, Y, CH - 0.5, 0.9, 0.14, 0.02, 0xf5f5f5); bl.rotation.y = k * Math.PI * 2 / 3;
+      bl.position.x += Math.cos(k * Math.PI * 2 / 3) * 0.45; bl.position.z -= Math.sin(k * Math.PI * 2 / 3) * 0.45; }
+  }
+  for (const X of [32.4, 34.65, 36.9]) for (const Y of [65.2, 68.0, 70.6]) box(X, Y, CH - 0.06, 1.2, 0.18, 0.05, new THREE.MeshBasicMaterial({ color: 0xfffdf2 }));
+  // 走廊側門牌
+  const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.32), new THREE.MeshBasicMaterial({ map: canvasTex(256, 92, (c, w, h) => {
+    c.fillStyle = "#1b2350"; c.fillRect(0, 0, w, h); c.fillStyle = "#f2b705"; c.font = "bold 58px 'Noto Sans TC', sans-serif";
+    c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("805", w / 2, h / 2 + 3); }) }));
+  plate.position.copy(P(X0 - 0.06, 64.95, 2.6)); plate.rotation.y = -Math.PI / 2; g.add(plate);
+  g.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+  scene.add(g);
+  for (const o of [g.children[2], g.children[3]]) collidables.push(o);   // 前後牆擋鏡頭
+  // 室內可行走面：0.25m 格子，扣掉桌椅、講桌、置物櫃；走廊側只從兩扇門進出
+  const C = 0.25, nx = Math.round((xi1 - xi0) / C), ny = Math.round((yi1 - yi0) / C);
+  const blocked = (X, Y) => {
+    if (Y > yi1 - 0.5) return true;                                           // 置物櫃
+    if (Math.abs(X - cx) < 0.75 && Y > Y0 + 0.85 && Y < Y0 + 1.65) return true; // 講桌
+    for (const [dx, dy] of desks) if (Math.abs(X - dx) < 0.38 && Y > dy - 0.3 && Y < dy + 0.8) return true;
+    return false;
+  };
+  const pos = [];
+  const quad = (xa, xb, ya, yb) => { const a = [xa, FL, -ya], b = [xb, FL, -ya], c = [xb, FL, -yb], d = [xa, FL, -yb]; pos.push(...a, ...b, ...c, ...a, ...c, ...d); };
+  for (let j = 0; j < ny; j++) {
+    let run = -1;
+    for (let i = 0; i <= nx; i++) {
+      const X = xi0 + (i + 0.5) * C, Y = yi0 + (j + 0.5) * C, ok = i < nx && X > xi0 + 0.2 && !blocked(X, Y);
+      if (ok && run < 0) run = i;
+      if (!ok && run >= 0) { quad(xi0 + run * C, xi0 + i * C, yi0 + j * C, yi0 + (j + 1) * C); run = -1; }
+    }
+  }
+  for (const [a, b] of DOOR) quad(X0 - 0.1, xi0 + 0.35, a + 0.1, b - 0.1);    // 門口通道
+  const ng = new THREE.BufferGeometry(); ng.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  const nm = new THREE.Mesh(ng, new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
+  scene.add(nm); navObjs.push(nm);
+  // 導航：走廊門口 → 前門 → 講台前
+  INTERIORS["3B805"] = { floor: FL, path: [[X0 - 0.6, 64.95], [X0 + 0.6, 64.95], [X0 + 1.2, 65.6], [cx - 1.2, 65.8], [cx, 66.0]] };
+}
+
 // ---------- 教室導航：從校門口沿可行走面走到教室門口 ----------
 const S = 0.5;                         // 導航格點間距（公尺）
 const GATE = new THREE.Vector3(97, 0, -6);
@@ -636,6 +772,8 @@ async function guideTo(r) {
   const yLv = r.z, tgt = nearestNode(r.dx, -r.dy, yLv, 0.7);
   if (tgt < 0 || NAV.start < 0) { gText.textContent = `找不到通往 ${r.n} 的路。`; return; }
   route = buildRoute(tgt); routeI = 1; routeRoom = r;
+  const inside = INTERIORS[r.f + r.b + r.n];      // 有室內的教室：從門口繼續走到講台前
+  if (inside) for (const [X, Y] of inside.path) route.push(new THREE.Vector3(X, inside.floor, -Y));
   if (route.length < 2) route.push(route[0].clone());
   // 路線
   if (routeMesh) { scene.remove(routeMesh); routeMesh.geometry.dispose(); }
@@ -682,6 +820,13 @@ function followRoute(dt) {
 function arrive() {
   const r = routeRoom; route = null;
   gText.innerHTML = `到了！這裡是 <b>${r.b} ${buildings[r.b]?.name ?? ""} ${r.f}F ${r.n}</b>`;
+  const inside = INTERIORS[r.f + r.b + r.n];
+  if (inside) {             // 站上講台、面向全班，鏡頭切到跟隨
+    girl.rotation.y = heading = Math.PI;
+    while (camMode !== 1) cycleCam();
+    followDist = 4.5; lookYaw = 0;
+    gText.innerHTML += "・這是樣板教室，可以用 W／S 前後走、A／D 轉向逛逛";
+  }
 }
 function stopGuide(msg) {
   route = null;
@@ -782,6 +927,7 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
   updateLabels();
 });
+if (girl) buildSampleRoom();
 canvas.focus();
 </script>
 
