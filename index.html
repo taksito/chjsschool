@@ -109,6 +109,16 @@ canvas#view { display: block; width: 100%; height: 100%; touch-action: none; out
 .fl { font: 400 15px var(--font-display); color: #1b2350; border-radius: 8px; text-align: center; padding: 5px 0; font-variant-numeric: tabular-nums; }
 .rooms { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .rooms span { background: var(--chip); border-radius: 6px; padding: 3px 7px; font-size: 13px; line-height: 1.4; }
+.rooms button { font: 13px var(--font-body); color: var(--ink); background: var(--chip); border: 1px solid transparent; border-radius: 6px; padding: 3px 7px; line-height: 1.4; cursor: pointer; }
+.rooms button:hover { border-color: var(--gold); }
+.rooms button:focus-visible, .find input:focus-visible, .guide button:focus-visible { outline: 3px solid var(--gold); outline-offset: 1px; }
+.find { position: absolute; top: 78px; left: max(16px, env(safe-area-inset-left, 0px)); display: flex; gap: 6px; background: var(--panel); border-radius: 12px; padding: 6px; box-shadow: var(--shadow); width: min(300px, calc(100% - 32px)); }
+.find input { flex: 1; min-width: 0; font: 14px var(--font-body); color: var(--ink); background: var(--panel-solid); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+.find button { font: 700 14px var(--font-body); color: var(--navy); background: var(--gold); border: 0; border-radius: 8px; padding: 0 12px; cursor: pointer; white-space: nowrap; }
+.guide { display: flex; align-items: center; gap: 10px; background: var(--navy); color: #fff; border-radius: 14px; padding: 8px 8px 8px 14px; box-shadow: var(--shadow); font-size: 14px; max-width: 100%; }
+.guide b { color: var(--gold); font-weight: 700; }
+.guide button { font: 500 13px var(--font-body); background: rgba(255,255,255,.16); color: #fff; border: 0; border-radius: 9px; padding: 6px 10px; cursor: pointer; white-space: nowrap; }
+.pin { position: absolute; transform: translate(-50%, -100%); background: var(--gold); color: var(--navy); font: 700 13px var(--font-body); padding: 4px 10px; border-radius: 999px; white-space: nowrap; box-shadow: 0 3px 10px rgba(0,0,0,.3); pointer-events: none; }
 .note { font-size: 13px; color: var(--ink-soft); border-top: 1px solid var(--line); padding-top: 10px; margin: 0; }
 
 .loading { position: absolute; inset: 0; display: grid; place-items: center; background: #a9cdee; color: #1b2350; font: 400 20px var(--font-display); }
@@ -127,15 +137,20 @@ canvas#view { display: block; width: 100%; height: 100%; touch-action: none; out
 
 <div id="app">
   <canvas id="view" tabindex="0" aria-label="忠孝國中 3D 校園，可用方向鍵或 WASD 移動主角"></canvas>
-  <div class="labels" id="labels"></div>
+  <div class="labels" id="labels"><div class="pin" id="pin" hidden></div></div>
 
   <div class="brand">
     <div class="seal">孝</div>
     <div>
       <h1>新北市立忠孝國中・3D 校園</h1>
-      <p>帶著忠孝娃走走看，點大樓查看各樓層</p>
+      <p>點教室，忠孝娃會從校門口帶你走過去</p>
     </div>
   </div>
+  <form class="find" id="find" autocomplete="off">
+    <input id="findIn" list="roomList" placeholder="找教室，例如 805、輔導處" aria-label="找教室">
+    <datalist id="roomList"></datalist>
+    <button type="submit">帶我去</button>
+  </form>
 
   <aside class="panel" id="panel" hidden aria-live="polite">
     <header>
@@ -148,6 +163,7 @@ canvas#view { display: block; width: 100%; height: 100%; touch-action: none; out
   </aside>
 
   <div class="dock">
+    <div class="guide" id="guide" hidden><span id="gText"></span><button id="gStop" type="button">結束</button></div>
     <button class="near" id="near" hidden>查看 D 望德樓</button>
     <button class="cam-btn" id="camBtn" title="切換視角（F1 或 V 鍵）">視角：環繞 <kbd>F1</kbd></button>
     <nav class="bldgs" id="bldgs" aria-label="走到大樓"></nav>
@@ -157,6 +173,7 @@ canvas#view { display: block; width: 100%; height: 100%; touch-action: none; out
   <div class="loading" id="loading"><div>載入校園中…<div class="bar"><i id="bar"></i></div></div></div>
 </div>
 
+<script src="nav.js"></script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -217,6 +234,8 @@ const load = (url) => {
 const labelsEl = document.getElementById("labels");
 const order = ["A", "B", "C", "D", "E"];
 let INFO = {};
+const ROOMS = window.__ROOMS || [];     // 各樓層教室（竣工圖位置＋115 學年度平面圖名稱）
+const roomLabel = r => `${r.n}｜${r.b} ${({A:"愛學樓",B:"集賢樓",C:"築夢樓",D:"望德樓",E:"向陽樓"})[r.b]} ${r.f}F`;
 const buildings = {};   // key -> { name, boxes:[], anchor, objects:[] }
 let ground = null, navMesh = null, girl = null, mixer = null, actions = [];
 const collidables = [];
@@ -224,7 +243,7 @@ const collidables = [];
 try {
   const [campus, girlGltf, info] = await Promise.all([
     load("campus_all.glb"), load("student_girl.glb"),
-    fetch("buildings.json").then(r => r.json())
+    (window.__INFO ? Promise.resolve(window.__INFO) : fetch("buildings.json").then(r => r.json()))
   ]);
   INFO = info;
   scene.add(campus.scene);
@@ -278,6 +297,8 @@ function setIdlePose() { for (const a of actions) a.time = 0.25; mixer?.update(0
 
 // ---------- UI ----------
 function buildUI() {
+  const dl = document.getElementById("roomList");
+  for (const r of ROOMS) { const o = document.createElement("option"); o.value = roomLabel(r); dl.appendChild(o); }
   const nav = document.getElementById("bldgs");
   for (const key of order) {
     const b = buildings[key]; if (!b) continue;
@@ -303,15 +324,22 @@ function openPanel(key) {
   document.getElementById("pName").textContent = d.名稱 + (key === "E" ? "（活動中心）" : "");
   document.getElementById("pSub").textContent = d.樓層數 + " 層樓";
   const ul = document.getElementById("pFloors"); ul.innerHTML = "";
-  for (const fl of ["4F", "3F", "2F", "1F"]) {
-    if (!d.樓層[fl]) continue;
+  for (const f of [4, 3, 2, 1]) {
+    const list = ROOMS.filter(r => r.b === key && r.f === f).sort((a, b) => b.y - a.y);
+    if (!list.length) continue;
     const li = document.createElement("li");
-    const rooms = d.樓層[fl].split("、").map(r => `<span>${r}</span>`).join("");
-    li.innerHTML = `<div class="fl" style="background:${FLOOR_COLOR[fl]}">${fl}</div><div class="rooms">${rooms}</div>`;
+    li.innerHTML = `<div class="fl" style="background:${FLOOR_COLOR[f + "F"]}">${f}F</div><div class="rooms"></div>`;
+    const box = li.querySelector(".rooms");
+    for (const r of list) {
+      const btn = document.createElement("button"); btn.type = "button"; btn.textContent = r.n;
+      btn.title = `帶我去 ${f}F ${r.n}`;
+      btn.addEventListener("click", () => guideTo(r));
+      box.appendChild(btn);
+    }
     ul.appendChild(li);
   }
   const note = document.getElementById("pNote");
-  note.hidden = !d.備註; note.textContent = d.備註 || "";
+  note.hidden = false; note.textContent = "點教室名稱，忠孝娃會從校門口走過去帶路。" + (d.備註 ? "　" + d.備註 : "");
   panel.hidden = false;
   for (const k of order) buildings[k]?.btn?.setAttribute("aria-pressed", String(k === key));
 }
@@ -329,7 +357,8 @@ const keys = new Set();
 addEventListener("keydown", e => {
   if (e.target.closest?.("button") && (e.key === "Enter" || e.key === " ")) return;
   const k = e.key.toLowerCase();
-  if (["w","a","s","d","arrowup","arrowdown","arrowleft","arrowright"].includes(k)) { keys.add(k); target = null; e.preventDefault(); }
+  if (e.target.closest?.("input")) return;
+  if (["w","a","s","d","arrowup","arrowdown","arrowleft","arrowright"].includes(k)) { keys.add(k); target = null; if (route) stopGuide("你接手了，導航先停下來。"); e.preventDefault(); }
   if ((k === "e" || k === "enter") && nearKey) openPanel(nearKey);
   if (k === "escape") document.getElementById("pClose").click();
   if (e.key === "F1" || k === "v") { e.preventDefault(); cycleCam(); }
@@ -350,7 +379,7 @@ canvas.addEventListener("pointerup", e => {
   const bHit = ray.intersectObjects(Object.values(buildings).flatMap(b => b.objects), true)
     .find(h => h.object.material.opacity > 0.5);
   const nHit = navMesh ? ray.intersectObject(navMesh, true)[0] : null;
-  if (nHit && (!bHit || nHit.distance <= bHit.distance + 0.6)) { target = nHit.point.clone(); return; }
+  if (nHit && (!bHit || nHit.distance <= bHit.distance + 0.6)) { if (route) stopGuide("你接手了，導航先停下來。"); target = nHit.point.clone(); return; }
   if (bHit) openPanel(bHit.object.userData.bkey);
 });
 
@@ -378,6 +407,7 @@ function walkToBuilding(key) {
 const camDelta = new THREE.Vector3();
 function moveGirl(dt) {
   if (!girl) return false;
+  if (route && !keys.size) return followRoute(dt);
   let dx = 0, dz = 0;
   const up = keys.has("w") || keys.has("arrowup"), down = keys.has("s") || keys.has("arrowdown");
   const left = keys.has("a") || keys.has("arrowleft"), rightK = keys.has("d") || keys.has("arrowright");
@@ -484,6 +514,185 @@ function updateLabels() {
   }
 }
 
+
+// ---------- 教室導航：從校門口沿可行走面走到教室門口 ----------
+const S = 0.5;                         // 導航格點間距（公尺）
+const GATE = new THREE.Vector3(97, 0, -6);
+const GUIDE_SPEED = 7;
+let NAV = null, route = null, routeI = 0, routeRoom = null, routeMesh = null;
+const ckey = (ix, iz) => (ix + 1000) * 4000 + (iz + 2000);
+async function loadNav() {
+  if (NAV) return NAV;
+  const bin = Uint8Array.from(atob(window.__NAV), c => c.charCodeAt(0));
+  const buf = await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+  const a = new Int16Array(buf), n = a.length / 3;
+  const ix = new Int16Array(n), iz = new Int16Array(n), y = new Float32Array(n), cell = new Map();
+  for (let i = 0; i < n; i++) {
+    ix[i] = a[3 * i]; iz[i] = a[3 * i + 1]; y[i] = a[3 * i + 2] / 20;
+    const k = ckey(ix[i], iz[i]); const c = cell.get(k); if (c) c.push(i); else cell.set(k, [i]);
+  }
+  NAV = { n, ix, iz, y, cell };
+  NAV.start = nearestNode(GATE.x, GATE.z, 0, 0.6);
+  dijkstra(NAV.start);
+  return NAV;
+}
+function nodeAt(cx, cz, yy, tol) {
+  const c = NAV.cell.get(ckey(cx, cz)); if (!c) return -1;
+  let best = -1, bd = tol;
+  for (const j of c) { const d = Math.abs(NAV.y[j] - yy); if (d <= bd) { bd = d; best = j; } }
+  return best;
+}
+function nearestNode(x, z, yy, tol) {
+  const cx = Math.round(x / S), cz = Math.round(z / S);
+  for (let r = 0; r <= 24; r++) {
+    let best = -1, bd = Infinity;
+    for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
+      if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+      const j = nodeAt(cx + dx, cz + dz, yy, tol);
+      if (j < 0 || (NAV.dist && !isFinite(NAV.dist[j]))) continue;
+      const d = Math.hypot(NAV.ix[j] * S - x, NAV.iz[j] * S - z);
+      if (d < bd) { bd = d; best = j; }
+    }
+    if (best >= 0) return best;
+  }
+  return -1;
+}
+function dijkstra(src) {
+  const { n, ix, iz, y } = NAV;
+  const dist = new Float64Array(n).fill(Infinity), prev = new Int32Array(n).fill(-1);
+  const heap = [];      // [d, i] 的二元堆積
+  const push = (d, i) => { heap.push([d, i]); let k = heap.length - 1; while (k) { const p = (k - 1) >> 1; if (heap[p][0] <= heap[k][0]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; k = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let k = 0; for (;;) { const l = 2 * k + 1, r = l + 1; let m = k; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; k = m; } } return top; };
+  const DIRS = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+  dist[src] = 0; push(0, src);
+  while (heap.length) {
+    const [d, i] = pop(); if (d > dist[i]) continue;
+    for (const [dx, dz] of DIRS) {
+      const j = nodeAt(ix[i] + dx, iz[i] + dz, y[i], 0.8); if (j < 0) continue;
+      if (dx && dz && (nodeAt(ix[i] + dx, iz[i], y[i], 0.8) < 0 || nodeAt(ix[i], iz[i] + dz, y[i], 0.8) < 0)) continue;
+      const nd = d + (dx && dz ? 1.414 : 1) * S + Math.abs(y[j] - y[i]) * 0.5;
+      if (nd < dist[j]) { dist[j] = nd; prev[j] = i; push(nd, j); }
+    }
+  }
+  NAV.dist = dist; NAV.prev = prev;
+}
+function clearLine(a, b) {      // 兩點之間每 0.25m 都踩得到可行走格點，才能直接走直線
+  const L = Math.hypot(b.x - a.x, b.z - a.z), n = Math.ceil(L / 0.25);
+  if (Math.abs(b.y - a.y) > L * 0.75 + 0.2) return false;          // 不能比樓梯還陡（避免穿過樓梯間直接升降）
+  for (let s = 1; s < n; s++) {
+    const t = s / n, x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t, yy = a.y + (b.y - a.y) * t;
+    if (nodeAt(Math.round(x / S), Math.round(z / S), yy, 0.45) < 0) return false;
+  }
+  return true;
+}
+function buildRoute(goal) {
+  const pts = [];
+  for (let j = goal; j >= 0; j = NAV.prev[j]) pts.push(new THREE.Vector3(NAV.ix[j] * S, NAV.y[j], NAV.iz[j] * S));
+  pts.reverse();
+  const out = [pts[0]];
+  let i = 0;
+  while (i < pts.length - 1) {
+    let k = Math.min(pts.length - 1, i + 80);
+    while (k > i + 1 && !clearLine(pts[i], pts[k])) k--;
+    out.push(pts[k]); i = k;
+  }
+  return out;
+}
+const marker = new THREE.Group();
+{
+  const mat = new THREE.MeshBasicMaterial({ color: 0xf2b705, depthTest: false, transparent: true });
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.7, 1.6, 20), mat); cone.rotation.x = Math.PI; cone.position.y = 2.2;
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.3, 32), mat); ring.rotation.x = -Math.PI / 2; ring.position.y = 0.08;
+  marker.add(cone, ring); marker.renderOrder = 20; cone.renderOrder = ring.renderOrder = 20;
+  marker.visible = false; scene.add(marker);
+}
+const pinEl = document.getElementById("pin"), guideEl = document.getElementById("guide"), gText = document.getElementById("gText");
+let markerT = 0;
+function updateMarker(dt) {
+  if (!marker.visible) return;
+  markerT += dt; marker.children[0].position.y = 2.2 + Math.sin(markerT * 3) * 0.3;
+  v.copy(marker.position); v.y += 3.6; v.project(camera);
+  const show = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
+  pinEl.hidden = !show;
+  if (show) { pinEl.style.left = ((v.x + 1) / 2 * canvas.clientWidth) + "px"; pinEl.style.top = ((1 - v.y) / 2 * canvas.clientHeight) + "px"; }
+  if (route) gText.innerHTML = `前往 <b>${routeRoom.b} ${buildings[routeRoom.b]?.name ?? ""} ${routeRoom.f}F ${routeRoom.n}</b>・還有 ${Math.round(remaining())} 公尺`;
+}
+function remaining() {
+  let d = Math.hypot(route[routeI].x - girl.position.x, route[routeI].z - girl.position.z);
+  for (let i = routeI + 1; i < route.length; i++) d += route[i].distanceTo(route[i - 1]);
+  return d;
+}
+async function guideTo(r) {
+  if (!girl) return;
+  guideEl.hidden = false; gText.textContent = "規劃路線中…";
+  try { await loadNav(); } catch (e) { gText.textContent = "這個瀏覽器不支援導航資料，請改用 Chrome 或 Edge。"; return; }
+  const yLv = r.z, tgt = nearestNode(r.dx, -r.dy, yLv, 0.7);
+  if (tgt < 0 || NAV.start < 0) { gText.textContent = `找不到通往 ${r.n} 的路。`; return; }
+  route = buildRoute(tgt); routeI = 1; routeRoom = r;
+  if (route.length < 2) route.push(route[0].clone());
+  // 路線
+  if (routeMesh) { scene.remove(routeMesh); routeMesh.geometry.dispose(); }
+  const path = new THREE.CurvePath();
+  for (let i = 1; i < route.length; i++) if (route[i].distanceTo(route[i - 1]) > 0.01) path.add(new THREE.LineCurve3(route[i - 1].clone().setY(route[i - 1].y + 0.25), route[i].clone().setY(route[i].y + 0.25)));
+  routeMesh = null;
+  if (path.curves.length) {
+  routeMesh = new THREE.Mesh(new THREE.TubeGeometry(path, Math.max(8, route.length * 6), 0.16, 6, false),
+    new THREE.MeshBasicMaterial({ color: 0xf2b705, transparent: true, opacity: 0.75, depthTest: false }));
+  routeMesh.renderOrder = 19; scene.add(routeMesh);
+  }
+  // 終點：教室門口
+  const end = route[route.length - 1];
+  marker.position.set(end.x, end.y, end.z); marker.visible = true;
+  pinEl.textContent = `${r.f}F ${r.n}`;
+  // 從校門口出發
+  const delta = new THREE.Vector3().subVectors(route[0], girl.position);
+  girl.position.copy(route[0]); girl.rotation.y = heading = Math.PI; target = null;
+  if (camMode === 0) {
+    controls.target.set(girl.position.x, girl.position.y + 2, girl.position.z);
+    camera.position.copy(controls.target).add(new THREE.Vector3(0, 26, 30));
+  } else camera.position.add(delta);
+  panel.hidden = true;
+  canvas.focus();
+}
+function followRoute(dt) {
+  const p = girl.position;
+  let step = GUIDE_SPEED * dt, tgt = route[routeI], d = Math.hypot(tgt.x - p.x, tgt.z - p.z);
+  while (d <= step && routeI < route.length - 1) { p.x = tgt.x; p.z = tgt.z; p.y = tgt.y; step -= d; routeI++; tgt = route[routeI]; d = Math.hypot(tgt.x - p.x, tgt.z - p.z); }
+  if (d <= step) { p.set(tgt.x, tgt.y, tgt.z); arrive(); return false; }
+  const ox = p.x, oy = p.y, oz = p.z, dx = (tgt.x - p.x) / d, dz = (tgt.z - p.z) / d;
+  const prev = route[routeI - 1], seg = Math.hypot(tgt.x - prev.x, tgt.z - prev.z) || 1;
+  const nx = p.x + dx * step, nz = p.z + dz * step;
+  const t = Math.min(1, Math.max(0, 1 - Math.hypot(tgt.x - nx, tgt.z - nz) / seg));
+  const ly = prev.y + (tgt.y - prev.y) * t;
+  let ny = heightAt(nx, nz, oy);
+  if (ny === null || Math.abs(ny - ly) > 0.5) ny = ly;
+  p.set(nx, ny, nz);
+  girl.rotation.y = heading = Math.atan2(dx, dz);
+  camDelta.set(nx - ox, ny - oy, nz - oz);
+  if (camMode === 0) { camera.position.add(camDelta); controls.target.add(camDelta); }
+  return true;
+}
+function arrive() {
+  const r = routeRoom; route = null;
+  gText.innerHTML = `到了！這裡是 <b>${r.b} ${buildings[r.b]?.name ?? ""} ${r.f}F ${r.n}</b>`;
+}
+function stopGuide(msg) {
+  route = null;
+  if (msg) gText.textContent = msg; else guideEl.hidden = true;
+}
+document.getElementById("gStop").addEventListener("click", () => {
+  route = null; guideEl.hidden = true; marker.visible = false; pinEl.hidden = true;
+  if (routeMesh) { scene.remove(routeMesh); routeMesh.geometry.dispose(); routeMesh = null; }
+  canvas.focus();
+});
+document.getElementById("find").addEventListener("submit", e => {
+  e.preventDefault();
+  const q = document.getElementById("findIn").value.trim(); if (!q) return;
+  const r = ROOMS.find(x => roomLabel(x) === q) || ROOMS.find(x => x.n === q) || ROOMS.find(x => x.n.includes(q) || q.includes(x.n));
+  if (r) { document.getElementById("findIn").value = roomLabel(r); guideTo(r); }
+  else { guideEl.hidden = false; gText.textContent = `找不到「${q}」，試試教室號碼或處室名稱。`; }
+});
+
 // ---------- 視角切換（F1 / V / 按鈕）：環繞 → 跟隨 → 第一人稱 ----------
 const CAM_NAMES = ["環繞", "跟隨", "第一人稱"];
 const CAM_HINTS = [
@@ -561,7 +770,7 @@ renderer.setAnimationLoop(() => {
     if (moved) { mixer.update(dt * 1.6); walking = true; }
     else if (walking) { setIdlePose(); walking = false; }
   }
-  updateNear(); updateFade(); updateFloor();
+  updateNear(); updateFade(); updateFloor(); updateMarker(dt);
   if (camMode === 0) controls.update(); else updateCamera(dt);
   renderer.render(scene, camera);
   updateLabels();
