@@ -557,6 +557,13 @@ function nearestNode(x, z, yy, tol) {
   }
   return -1;
 }
+// 上下樓優先走築夢樓中央的 H 梯（與通往向陽樓 2F 的坡道）；邊邊的樓梯每升降 1 公尺多算 15 公尺，除非繞太遠才會用
+function preferred(i) {
+  const x = NAV.ix[i] * S, z = NAV.iz[i] * S;
+  if (x > 56.5 && x < 69 && z > -36.5 && z < -30.5) return true;      // H 梯（竣工圖 A5-17）
+  if (x > 113.5 && x < 125 && z > -40.6 && z < -37.8) return true;    // 望德樓→向陽樓 2F 坡道
+  return false;
+}
 function dijkstra(src) {
   const { n, ix, iz, y } = NAV;
   const dist = new Float64Array(n).fill(Infinity), prev = new Int32Array(n).fill(-1);
@@ -570,7 +577,7 @@ function dijkstra(src) {
     for (const [dx, dz] of DIRS) {
       const j = nodeAt(ix[i] + dx, iz[i] + dz, y[i], 0.8); if (j < 0) continue;
       if (dx && dz && (nodeAt(ix[i] + dx, iz[i], y[i], 0.8) < 0 || nodeAt(ix[i], iz[i] + dz, y[i], 0.8) < 0)) continue;
-      const nd = d + (dx && dz ? 1.414 : 1) * S + Math.abs(y[j] - y[i]) * 0.5;
+      const nd = d + (dx && dz ? 1.414 : 1) * S + Math.abs(y[j] - y[i]) * (preferred(i) || preferred(j) ? 0.5 : 15);
       if (nd < dist[j]) { dist[j] = nd; prev[j] = i; push(nd, j); }
     }
   }
